@@ -2552,6 +2552,7 @@ function ResultView({ chapter, sessionQuestions, answers, onRetry, onHome }) {
 /* ---------------- 問題一覧（正解回数で分類）画面 ---------------- */
 function QuestionBrowseView({ chapter, qStats, onExit }) {
   const [openSet, setOpenSet] = useState(() => new Set());
+  const [activeTab, setActiveTab] = useState(0);
 
   function toggle(i) {
     setOpenSet((prev) => {
@@ -2563,20 +2564,20 @@ function QuestionBrowseView({ chapter, qStats, onExit }) {
   }
 
   const buckets = [
-    { key: 0, label: "未正解（優先的に復習）" },
-    { key: 1, label: "正解 1回" },
-    { key: 2, label: "正解 2回" },
-    { key: "3+", label: "正解 3回以上（習得済み）" },
+    { key: 0, label: "未正解" },
+    { key: 1, label: "1回正解" },
+    { key: 2, label: "2回正解" },
+    { key: "3+", label: "3回以上正解" },
   ];
 
-  const grouped = buckets
-    .map((b) => ({
-      ...b,
-      items: chapter.questions
-        .map((q, i) => ({ q, i, c: qStats[i]?.c || 0 }))
-        .filter(({ c }) => (b.key === "3+" ? c >= 3 : c === b.key)),
-    }))
-    .filter((g) => g.items.length > 0);
+  const grouped = buckets.map((b) => ({
+    ...b,
+    items: chapter.questions
+      .map((q, i) => ({ q, i, c: qStats[i]?.c || 0 }))
+      .filter(({ c }) => (b.key === "3+" ? c >= 3 : c === b.key)),
+  }));
+
+  const active = grouped[activeTab];
 
   return (
     <div>
@@ -2592,98 +2593,121 @@ function QuestionBrowseView({ chapter, qStats, onExit }) {
       <div style={{ fontFamily: serif, fontSize: 20, fontWeight: 700, color: navyDeep, marginBottom: 4 }}>
         {chapter.title}
       </div>
-      <p style={{ fontSize: 12, color: "#8A8F98", marginBottom: 20 }}>
-        正解回数が少ない問題ほど上に表示されます。タップすると選択肢と解説を確認できます。
+      <p style={{ fontSize: 12, color: "#8A8F98", marginBottom: 16 }}>
+        タブで正解回数ごとに切り替えて確認できます。タップすると選択肢と解説を確認できます。
       </p>
 
-      {grouped.map((g) => (
-        <section key={g.key} style={{ marginBottom: 22 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
-            <div style={{ width: 18, height: 1, background: gold }} />
-            <h3 style={{ fontFamily: serif, fontSize: 13, letterSpacing: 1, color: navy, margin: 0, fontWeight: 700 }}>
-              {g.label}（{g.items.length}問）
-            </h3>
-          </div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            {g.items.map(({ q, i, c }) => {
-              const isOpen = openSet.has(i);
-              return (
-                <div
-                  key={i}
-                  style={{ background: "#FFFFFF", border: `1px solid ${line}`, borderRadius: 4, overflow: "hidden" }}
+      <div style={{ display: "flex", marginBottom: 18, borderBottom: `1px solid ${line}` }}>
+        {grouped.map((g, idx) => {
+          const isActive = idx === activeTab;
+          return (
+            <button
+              key={g.key}
+              onClick={() => setActiveTab(idx)}
+              style={{
+                flex: 1,
+                textAlign: "center",
+                padding: "10px 4px",
+                background: "transparent",
+                border: "none",
+                borderBottom: `2px solid ${isActive ? gold : "transparent"}`,
+                marginBottom: -1,
+                color: isActive ? navyDeep : "#8A8F98",
+                fontWeight: isActive ? 700 : 600,
+                fontSize: 12,
+              }}
+            >
+              <div>{g.label}</div>
+              <div style={{ fontSize: 11, marginTop: 2, color: isActive ? gold : "#B9B4A5" }}>{g.items.length}問</div>
+            </button>
+          );
+        })}
+      </div>
+
+      {active.items.length === 0 ? (
+        <p style={{ fontSize: 13, color: "#8A8F98", textAlign: "center", padding: "32px 0" }}>
+          該当する問題はありません。
+        </p>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {active.items.map(({ q, i, c }) => {
+            const isOpen = openSet.has(i);
+            return (
+              <div
+                key={i}
+                style={{ background: "#FFFFFF", border: `1px solid ${line}`, borderRadius: 4, overflow: "hidden" }}
+              >
+                <button
+                  onClick={() => toggle(i)}
+                  style={{
+                    width: "100%",
+                    textAlign: "left",
+                    display: "flex",
+                    alignItems: "flex-start",
+                    gap: 10,
+                    padding: "12px 14px",
+                    background: "transparent",
+                    border: "none",
+                  }}
                 >
-                  <button
-                    onClick={() => toggle(i)}
+                  <span
                     style={{
-                      width: "100%",
-                      textAlign: "left",
-                      display: "flex",
-                      alignItems: "flex-start",
-                      gap: 10,
-                      padding: "12px 14px",
-                      background: "transparent",
-                      border: "none",
+                      fontSize: 11,
+                      fontWeight: 700,
+                      color: c === 0 ? brick : gold,
+                      minWidth: 44,
+                      marginTop: 2,
+                      whiteSpace: "nowrap",
                     }}
                   >
-                    <span
+                    {c === 0 ? "未正解" : `${c}回`}
+                  </span>
+                  <span style={{ flex: 1, fontSize: 14, lineHeight: 1.6, color: ink }}>{q.q}</span>
+                  <span style={{ fontSize: 16, color: "#B9B4A5", marginLeft: 6 }}>{isOpen ? "︿" : "﹀"}</span>
+                </button>
+                {isOpen && (
+                  <div style={{ padding: "0 14px 14px 14px" }}>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 10 }}>
+                      {q.options.map((opt, oi) => (
+                        <div
+                          key={oi}
+                          style={{
+                            padding: "8px 12px",
+                            borderRadius: 4,
+                            fontSize: 13,
+                            border: `1.5px solid ${oi === q.correct ? gold : line}`,
+                            background: oi === q.correct ? "#F5EFDE" : "#FAFAF7",
+                            color: oi === q.correct ? navyDeep : ink,
+                            fontWeight: oi === q.correct ? 700 : 400,
+                          }}
+                        >
+                          {String.fromCharCode(65 + oi)}. {opt}
+                          {oi === q.correct && (
+                            <span style={{ marginLeft: 8, fontSize: 11, color: gold }}>正解</span>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                    <div
                       style={{
-                        fontSize: 11,
-                        fontWeight: 700,
-                        color: c === 0 ? brick : gold,
-                        minWidth: 44,
-                        marginTop: 2,
-                        whiteSpace: "nowrap",
+                        padding: 12,
+                        background: "#EFF2EE",
+                        borderLeft: `4px solid ${navy}`,
+                        borderRadius: 3,
+                        fontSize: 13,
+                        lineHeight: 1.7,
                       }}
                     >
-                      {c === 0 ? "未正解" : `${c}回`}
-                    </span>
-                    <span style={{ flex: 1, fontSize: 14, lineHeight: 1.6, color: ink }}>{q.q}</span>
-                    <span style={{ fontSize: 16, color: "#B9B4A5", marginLeft: 6 }}>{isOpen ? "︿" : "﹀"}</span>
-                  </button>
-                  {isOpen && (
-                    <div style={{ padding: "0 14px 14px 14px" }}>
-                      <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 10 }}>
-                        {q.options.map((opt, oi) => (
-                          <div
-                            key={oi}
-                            style={{
-                              padding: "8px 12px",
-                              borderRadius: 4,
-                              fontSize: 13,
-                              border: `1.5px solid ${oi === q.correct ? gold : line}`,
-                              background: oi === q.correct ? "#F5EFDE" : "#FAFAF7",
-                              color: oi === q.correct ? navyDeep : ink,
-                              fontWeight: oi === q.correct ? 700 : 400,
-                            }}
-                          >
-                            {String.fromCharCode(65 + oi)}. {opt}
-                            {oi === q.correct && (
-                              <span style={{ marginLeft: 8, fontSize: 11, color: gold }}>正解</span>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                      <div
-                        style={{
-                          padding: 12,
-                          background: "#EFF2EE",
-                          borderLeft: `4px solid ${navy}`,
-                          borderRadius: 3,
-                          fontSize: 13,
-                          lineHeight: 1.7,
-                        }}
-                      >
-                        <div style={{ fontWeight: 700, color: navy, marginBottom: 4, fontSize: 12 }}>解説</div>
-                        {q.exp}
-                      </div>
+                      <div style={{ fontWeight: 700, color: navy, marginBottom: 4, fontSize: 12 }}>解説</div>
+                      {q.exp}
                     </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        </section>
-      ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
