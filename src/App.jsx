@@ -1912,6 +1912,17 @@ const brick = "#A23F3F";
 const serif = '"Hiragino Mincho ProN","Yu Mincho","Noto Serif JP",serif';
 const sans = '"Hiragino Kaku Gothic ProN","Yu Gothic","Noto Sans JP",sans-serif';
 
+/* ============================================================
+   重み付きランダム抽選（Efraimidis-Spirakis法）
+   正解回数が少ない問題ほど重みを大きくし、優先的に選ばれやすくする。
+   ただし毎回 Math.random() を使うため出題順・出題内容はランダムに変化する。
+   ============================================================ */
+function weightedSampleIndices(weights, n) {
+  const keyed = weights.map((w, i) => ({ i, key: Math.pow(Math.random(), 1 / Math.max(w, 1e-6)) }));
+  keyed.sort((a, b) => b.key - a.key);
+  return keyed.slice(0, n).map((k) => k.i);
+}
+
 function Ticket({ children, style }) {
   return (
     <div
@@ -1991,27 +2002,37 @@ export default function GKenteiQuiz() {
     }
   }, []);
 
+  const loadQStats = useCallback(async (chapterId) => {
+    try {
+      const r = await window.storage.get(`qstats:${chapterId}`);
+      return r && r.value ? JSON.parse(r.value) : {};
+    } catch (e) {
+      return {};
+    }
+  }, []);
+
   async function startChapter(idx) {
     const ch = CHAPTERS[idx];
-    const allIndices = ch.questions.map((_, i) => i);
-    // Fisher-Yates シャッフルで章内からランダムに最大10問を選出
-    for (let i = allIndices.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [allIndices[i], allIndices[j]] = [allIndices[j], allIndices[i]];
-    }
-    setSessionIndices(allIndices.slice(0, Math.min(10, allIndices.length)));
+    const stats = await loadQStats(ch.id);
+    // 正解回数が少ない問題ほど重みを大きくして、ランダムだが優先的に出題されるようにする
+    const weights = ch.questions.map((_, i) => 1 / ((stats[i]?.c || 0) + 1));
+    const picked = weightedSampleIndices(weights, Math.min(10, ch.questions.length));
+    setSessionIndices(picked);
     setChapterIdx(idx);
     setQIdx(0);
     setSelected(null);
     setRevealed(false);
     setAnswers([]);
+    setQStats(stats);
     setView("quiz");
-    try {
-      const r = await window.storage.get(`qstats:${ch.id}`);
-      setQStats(r && r.value ? JSON.parse(r.value) : {});
-    } catch (e) {
-      setQStats({});
-    }
+  }
+
+  async function browseChapter(idx) {
+    const ch = CHAPTERS[idx];
+    const stats = await loadQStats(ch.id);
+    setChapterIdx(idx);
+    setQStats(stats);
+    setView("browse");
   }
 
   // 正解履歴（章内の問題インデックス -> {c: 正解回数, a: 挑戦回数}）を1キーにまとめて保存
@@ -2101,7 +2122,12 @@ export default function GKenteiQuiz() {
             progress={progress}
             loaded={loaded}
             onSelect={startChapter}
+            onBrowse={browseChapter}
           />
+        )}
+
+        {view === "browse" && chapter && (
+          <QuestionBrowseView chapter={chapter} qStats={qStats} onExit={() => setView("chapters")} />
         )}
 
         {view === "quiz" && question && (
@@ -2136,7 +2162,7 @@ export default function GKenteiQuiz() {
 }
 
 /* ---------------- 章選択画面 ---------------- */
-function ChapterList({ chapters, progress, loaded, onSelect }) {
+function ChapterList({ chapters, progress, loaded, onSelect, onBrowse }) {
   const groups = [
     { name: "技術分野", items: chapters.filter((c) => c.group === "技術分野") },
     { name: "法律・倫理分野", items: chapters.filter((c) => c.group === "法律・倫理分野") },
@@ -2174,45 +2200,69 @@ function ChapterList({ chapters, progress, loaded, onSelect }) {
               const p = progress[c.id];
               const done = !!p;
               return (
-                <button
+                <div
                   key={c.id}
-                  onClick={() => onSelect(chapters.indexOf(c))}
                   style={{
-                    textAlign: "left",
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 14,
                     background: "#FFFFFF",
                     border: `1px solid ${line}`,
                     borderLeft: `5px solid ${done ? gold : navy}`,
                     borderRadius: 3,
-                    padding: "14px 16px",
                   }}
                 >
-                  <div
+                  <button
+                    onClick={() => onSelect(chapters.indexOf(c))}
                     style={{
-                      fontFamily: serif,
-                      fontSize: 26,
-                      color: done ? gold : navy,
-                      minWidth: 40,
-                      textAlign: "center",
-                      fontWeight: 700,
+                      width: "100%",
+                      textAlign: "left",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 14,
+                      background: "transparent",
+                      border: "none",
+                      padding: "14px 16px",
                     }}
                   >
-                    {String(c.no).padStart(2, "0")}
-                  </div>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 2 }}>{c.title}</div>
-                    <div style={{ fontSize: 12, color: "#6B7280" }}>
-                      {loaded
-                        ? done
-                          ? `最高 ${p.best}/${p.total} 問正解（挑戦 ${p.attempts} 回）`
-                          : `問題プール${c.questions.length}問からランダムに10問・未挑戦`
-                        : "読み込み中…"}
+                    <div
+                      style={{
+                        fontFamily: serif,
+                        fontSize: 26,
+                        color: done ? gold : navy,
+                        minWidth: 40,
+                        textAlign: "center",
+                        fontWeight: 700,
+                      }}
+                    >
+                      {String(c.no).padStart(2, "0")}
                     </div>
-                  </div>
-                  <div style={{ fontSize: 20, color: "#B9B4A5" }}>›</div>
-                </button>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 2 }}>{c.title}</div>
+                      <div style={{ fontSize: 12, color: "#6B7280" }}>
+                        {loaded
+                          ? done
+                            ? `最高 ${p.best}/${p.total} 問正解（挑戦 ${p.attempts} 回）`
+                            : `問題プール${c.questions.length}問からランダムに10問・未挑戦`
+                          : "読み込み中…"}
+                      </div>
+                    </div>
+                    <div style={{ fontSize: 20, color: "#B9B4A5" }}>›</div>
+                  </button>
+                  <button
+                    onClick={() => onBrowse(chapters.indexOf(c))}
+                    style={{
+                      width: "100%",
+                      textAlign: "left",
+                      background: "transparent",
+                      border: "none",
+                      borderTop: `1px dashed ${line}`,
+                      padding: "8px 16px 10px 70px",
+                      fontSize: 12,
+                      color: navy,
+                      fontWeight: 600,
+                    }}
+                  >
+                    問題一覧を見る（全{c.questions.length}問・正解回数で分類）
+                  </button>
+                </div>
               );
             })}
           </div>
@@ -2220,7 +2270,7 @@ function ChapterList({ chapters, progress, loaded, onSelect }) {
       ))}
 
       <p style={{ fontSize: 12, color: "#8A8F98", textAlign: "center", marginTop: 8 }}>
-        各章は問題プールからランダムに10問出題されます。成績は端末に保存され、次回訪問時にも表示されます。
+        各章は問題プールからランダムに10問出題されます（正解回数が少ない問題ほど優先的に選ばれます）。成績は端末に保存され、次回訪問時にも表示されます。
       </p>
     </div>
   );
@@ -2495,6 +2545,145 @@ function ResultView({ chapter, sessionQuestions, answers, onRetry, onHome }) {
           章選択に戻る
         </button>
       </div>
+    </div>
+  );
+}
+
+/* ---------------- 問題一覧（正解回数で分類）画面 ---------------- */
+function QuestionBrowseView({ chapter, qStats, onExit }) {
+  const [openSet, setOpenSet] = useState(() => new Set());
+
+  function toggle(i) {
+    setOpenSet((prev) => {
+      const next = new Set(prev);
+      if (next.has(i)) next.delete(i);
+      else next.add(i);
+      return next;
+    });
+  }
+
+  const buckets = [
+    { key: 0, label: "未正解（優先的に復習）" },
+    { key: 1, label: "正解 1回" },
+    { key: 2, label: "正解 2回" },
+    { key: "3+", label: "正解 3回以上（習得済み）" },
+  ];
+
+  const grouped = buckets
+    .map((b) => ({
+      ...b,
+      items: chapter.questions
+        .map((q, i) => ({ q, i, c: qStats[i]?.c || 0 }))
+        .filter(({ c }) => (b.key === "3+" ? c >= 3 : c === b.key)),
+    }))
+    .filter((g) => g.items.length > 0);
+
+  return (
+    <div>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
+        <button onClick={onExit} style={{ background: "none", border: "none", color: navy, fontSize: 13, padding: 0 }}>
+          ← 章選択に戻る
+        </button>
+        <div style={{ fontSize: 13, color: "#6B7280" }}>
+          第{chapter.no}章・全{chapter.questions.length}問
+        </div>
+      </div>
+
+      <div style={{ fontFamily: serif, fontSize: 20, fontWeight: 700, color: navyDeep, marginBottom: 4 }}>
+        {chapter.title}
+      </div>
+      <p style={{ fontSize: 12, color: "#8A8F98", marginBottom: 20 }}>
+        正解回数が少ない問題ほど上に表示されます。タップすると選択肢と解説を確認できます。
+      </p>
+
+      {grouped.map((g) => (
+        <section key={g.key} style={{ marginBottom: 22 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
+            <div style={{ width: 18, height: 1, background: gold }} />
+            <h3 style={{ fontFamily: serif, fontSize: 13, letterSpacing: 1, color: navy, margin: 0, fontWeight: 700 }}>
+              {g.label}（{g.items.length}問）
+            </h3>
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {g.items.map(({ q, i, c }) => {
+              const isOpen = openSet.has(i);
+              return (
+                <div
+                  key={i}
+                  style={{ background: "#FFFFFF", border: `1px solid ${line}`, borderRadius: 4, overflow: "hidden" }}
+                >
+                  <button
+                    onClick={() => toggle(i)}
+                    style={{
+                      width: "100%",
+                      textAlign: "left",
+                      display: "flex",
+                      alignItems: "flex-start",
+                      gap: 10,
+                      padding: "12px 14px",
+                      background: "transparent",
+                      border: "none",
+                    }}
+                  >
+                    <span
+                      style={{
+                        fontSize: 11,
+                        fontWeight: 700,
+                        color: c === 0 ? brick : gold,
+                        minWidth: 44,
+                        marginTop: 2,
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      {c === 0 ? "未正解" : `${c}回`}
+                    </span>
+                    <span style={{ flex: 1, fontSize: 14, lineHeight: 1.6, color: ink }}>{q.q}</span>
+                    <span style={{ fontSize: 16, color: "#B9B4A5", marginLeft: 6 }}>{isOpen ? "︿" : "﹀"}</span>
+                  </button>
+                  {isOpen && (
+                    <div style={{ padding: "0 14px 14px 14px" }}>
+                      <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 10 }}>
+                        {q.options.map((opt, oi) => (
+                          <div
+                            key={oi}
+                            style={{
+                              padding: "8px 12px",
+                              borderRadius: 4,
+                              fontSize: 13,
+                              border: `1.5px solid ${oi === q.correct ? gold : line}`,
+                              background: oi === q.correct ? "#F5EFDE" : "#FAFAF7",
+                              color: oi === q.correct ? navyDeep : ink,
+                              fontWeight: oi === q.correct ? 700 : 400,
+                            }}
+                          >
+                            {String.fromCharCode(65 + oi)}. {opt}
+                            {oi === q.correct && (
+                              <span style={{ marginLeft: 8, fontSize: 11, color: gold }}>正解</span>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                      <div
+                        style={{
+                          padding: 12,
+                          background: "#EFF2EE",
+                          borderLeft: `4px solid ${navy}`,
+                          borderRadius: 3,
+                          fontSize: 13,
+                          lineHeight: 1.7,
+                        }}
+                      >
+                        <div style={{ fontWeight: 700, color: navy, marginBottom: 4, fontSize: 12 }}>解説</div>
+                        {q.exp}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      ))}
     </div>
   );
 }
