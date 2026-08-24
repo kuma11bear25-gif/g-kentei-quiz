@@ -2297,7 +2297,7 @@ function ChapterList({ chapters, progress, savedSessions, loaded, onSelect, onBr
                       <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 2 }}>{c.title}</div>
                       <div style={{ fontSize: 12, color: "#6B7280", minHeight: 16 }}>
                         {loaded && saved
-                          ? `前回の続きから再開できます（${saved.answers.length}/${saved.sessionIndices.length}問まで回答済み）`
+                          ? `続きから（${saved.answers.length}/${saved.sessionIndices.length}）`
                           : ""}
                       </div>
                     </div>
