@@ -2265,12 +2265,10 @@ function ChapterList({ chapters, progress, savedSessions, loaded, onSelect, onBr
                     </div>
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 2 }}>{c.title}</div>
-                      <div style={{ fontSize: 12, color: "#6B7280" }}>
-                        {loaded
-                          ? saved
-                            ? `前回の続きから再開できます（${saved.answers.length}/${saved.sessionIndices.length}問まで回答済み）`
-                            : `問題プール${c.questions.length}問からランダムに10問`
-                          : "読み込み中…"}
+                      <div style={{ fontSize: 12, color: "#6B7280", minHeight: 16 }}>
+                        {loaded && saved
+                          ? `前回の続きから再開できます（${saved.answers.length}/${saved.sessionIndices.length}問まで回答済み）`
+                          : ""}
                       </div>
                     </div>
                     <div style={{ fontSize: 20, color: "#B9B4A5" }}>›</div>
