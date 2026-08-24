@@ -2002,20 +2002,23 @@ export default function GKenteiQuiz() {
   const [qStats, setQStats] = useState({}); // 現在の章: 問題index -> {c: 正解回数, a: 挑戦回数}
   const [sessionIndices, setSessionIndices] = useState([]); // 今回出題する問題の元配列インデックス（ランダム10問）
   const [savedSessions, setSavedSessions] = useState({}); // chapterId -> 途中保存されたクイズの状態
+  const [allQStats, setAllQStats] = useState({}); // chapterId -> 問題index -> {c, a}（章一覧の習得率表示に使う）
 
   const chapter = CHAPTERS[chapterIdx];
   const currentOriginalIdx = sessionIndices[qIdx];
   const question = chapter && currentOriginalIdx !== undefined ? chapter.questions[currentOriginalIdx] : null;
 
-  // load progress ＆ 途中保存されたクイズの状態
+  // load progress ＆ 途中保存されたクイズの状態 ＆ 全章の正解統計
   useEffect(() => {
     (async () => {
-      const [progressMap, sessionMap] = await Promise.all([
+      const [progressMap, sessionMap, qStatsMap] = await Promise.all([
         loadStorageMap("progress:"),
         loadStorageMap("session:"),
+        loadStorageMap("qstats:"),
       ]);
       setProgress(progressMap);
       setSavedSessions(sessionMap);
+      setAllQStats(qStatsMap);
       setLoaded(true);
     })();
   }, []);
@@ -2103,6 +2106,7 @@ export default function GKenteiQuiz() {
       const cur = prev[idx] || { c: 0, a: 0 };
       const next = { ...prev, [idx]: { c: cur.c + (isCorrect ? 1 : 0), a: cur.a + 1 } };
       window.storage.set(`qstats:${chapter.id}`, JSON.stringify(next)).catch(() => {});
+      setAllQStats((allPrev) => ({ ...allPrev, [chapter.id]: next }));
       return next;
     });
   }
@@ -2179,6 +2183,7 @@ export default function GKenteiQuiz() {
             chapters={CHAPTERS}
             progress={progress}
             savedSessions={savedSessions}
+            allQStats={allQStats}
             loaded={loaded}
             onSelect={startChapter}
             onBrowse={browseChapter}
@@ -2220,7 +2225,7 @@ export default function GKenteiQuiz() {
 }
 
 /* ---------------- 章選択画面 ---------------- */
-function ChapterList({ chapters, progress, savedSessions, loaded, onSelect, onBrowse }) {
+function ChapterList({ chapters, progress, savedSessions, allQStats, loaded, onSelect, onBrowse }) {
   const groups = [
     { name: "技術分野", items: chapters.filter((c) => c.group === "技術分野") },
     { name: "法律・倫理分野", items: chapters.filter((c) => c.group === "法律・倫理分野") },
@@ -2258,6 +2263,9 @@ function ChapterList({ chapters, progress, savedSessions, loaded, onSelect, onBr
               const p = progress[c.id];
               const done = !!p;
               const saved = savedSessions[c.id];
+              const stats = allQStats[c.id] || {};
+              const masteredCount = Object.values(stats).filter((s) => (s?.c || 0) >= 3).length;
+              const masteryPct = c.questions.length > 0 ? Math.round((masteredCount / c.questions.length) * 100) : 0;
               return (
                 <div
                   key={c.id}
@@ -2300,6 +2308,24 @@ function ChapterList({ chapters, progress, savedSessions, loaded, onSelect, onBr
                           ? `続きから（${saved.answers.length}/${saved.sessionIndices.length}）`
                           : ""}
                       </div>
+                      {loaded && (
+                        <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 4 }}>
+                          <div
+                            style={{
+                              flex: 1,
+                              height: 4,
+                              background: "#E7E4D8",
+                              borderRadius: 2,
+                              overflow: "hidden",
+                            }}
+                          >
+                            <div style={{ width: `${masteryPct}%`, height: "100%", background: gold }} />
+                          </div>
+                          <div style={{ fontSize: 11, color: "#8A8F98", whiteSpace: "nowrap" }}>
+                            習得 {masteredCount}/{c.questions.length}（{masteryPct}%）
+                          </div>
+                        </div>
+                      )}
                     </div>
                     <div style={{ fontSize: 20, color: "#B9B4A5" }}>›</div>
                   </button>
