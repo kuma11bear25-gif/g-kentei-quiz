@@ -2041,9 +2041,14 @@ export default function GKenteiQuiz() {
       setView("quiz");
       return;
     }
-    // 正解回数が少ない問題ほど重みを大きくして、ランダムだが優先的に出題されるようにする
-    const weights = ch.questions.map((_, i) => 1 / ((stats[i]?.c || 0) + 1));
-    const picked = weightedSampleIndices(weights, Math.min(10, ch.questions.length));
+    // 3回以上正解した問題（習得済み）は出題対象から除外し、
+    // 残った問題は正解回数が少ないほど重みを大きくして、ランダムだが優先的に出題されるようにする
+    const candidates = ch.questions
+      .map((_, i) => i)
+      .filter((i) => (stats[i]?.c || 0) < 3);
+    const pool = candidates.length > 0 ? candidates : ch.questions.map((_, i) => i);
+    const weights = pool.map((i) => 1 / ((stats[i]?.c || 0) + 1));
+    const picked = weightedSampleIndices(weights, Math.min(10, pool.length)).map((wi) => pool[wi]);
     setSessionIndices(picked);
     setChapterIdx(idx);
     setQIdx(0);
@@ -2081,16 +2086,13 @@ export default function GKenteiQuiz() {
     recordAnswer(currentOriginalIdx, isCorrect);
   }
 
-  // 回答済みの次へ、またはスキップ（追加の回答なし）で共通して呼ぶ進行処理
-  function advance(extraAnswer) {
-    const newAnswers = extraAnswer ? [...answers, extraAnswer] : answers;
-    if (extraAnswer) setAnswers(newAnswers);
+  function nextQuestion() {
     if (qIdx + 1 < sessionIndices.length) {
       setQIdx(qIdx + 1);
       setSelected(null);
       setRevealed(false);
     } else {
-      const finalScore = newAnswers.filter((a) => a.correct).length;
+      const finalScore = answers.filter((a) => a.correct).length;
       saveProgress(chapter.id, finalScore, sessionIndices.length);
       // 章を完走したので途中保存は不要になる
       window.storage.delete(`session:${chapter.id}`).catch(() => {});
@@ -2101,14 +2103,6 @@ export default function GKenteiQuiz() {
       });
       setView("result");
     }
-  }
-
-  function nextQuestion() {
-    advance(null);
-  }
-
-  function skipQuestion() {
-    advance({ correct: true, skipped: true });
   }
 
   const score = answers.filter((a) => a.correct).length;
@@ -2175,7 +2169,6 @@ export default function GKenteiQuiz() {
             revealed={revealed}
             onPick={pickOption}
             onNext={nextQuestion}
-            onSkip={skipQuestion}
             onExit={() => setView("chapters")}
             currentScore={score}
             qStat={qStats[currentOriginalIdx]}
@@ -2313,10 +2306,9 @@ function ChapterList({ chapters, progress, savedSessions, loaded, onSelect, onBr
 }
 
 /* ---------------- クイズ画面 ---------------- */
-function QuizView({ chapter, qIdx, total, question, selected, revealed, onPick, onNext, onSkip, onExit, currentScore, qStat }) {
+function QuizView({ chapter, qIdx, total, question, selected, revealed, onPick, onNext, onExit, currentScore, qStat }) {
   const pct = ((qIdx + (revealed ? 1 : 0)) / total) * 100;
   const correctCount = qStat?.c || 0;
-  const canSkip = !revealed && correctCount >= 2;
 
   return (
     <div>
@@ -2353,44 +2345,23 @@ function QuizView({ chapter, qIdx, total, question, selected, revealed, onPick, 
           }}
         >
           <div style={{ fontFamily: serif, fontSize: 12, color: navy, letterSpacing: 1 }}>{chapter.title}</div>
-          {correctCount > 0 && (
-            <div
-              style={{
-                fontSize: 11,
-                fontWeight: 700,
-                color: gold,
-                background: "#F5EFDE",
-                border: `1px solid ${gold}`,
-                borderRadius: 20,
-                padding: "2px 9px",
-                whiteSpace: "nowrap",
-              }}
-            >
-              ✓ 過去に正解 {correctCount}回
-            </div>
-          )}
+          <div
+            style={{
+              fontSize: 11,
+              fontWeight: 700,
+              color: correctCount > 0 ? gold : "#8A8F98",
+              background: correctCount > 0 ? "#F5EFDE" : "#EFEEE8",
+              border: `1px solid ${correctCount > 0 ? gold : line}`,
+              borderRadius: 20,
+              padding: "2px 9px",
+              whiteSpace: "nowrap",
+            }}
+          >
+            {correctCount > 0 ? `✓ 過去に正解 ${correctCount}回` : "未正解"}
+          </div>
         </div>
         <p style={{ fontSize: 17, lineHeight: 1.7, margin: 0, fontWeight: 600 }}>{question.q}</p>
       </Ticket>
-
-      {canSkip && (
-        <button
-          onClick={onSkip}
-          style={{
-            width: "100%",
-            marginBottom: 12,
-            padding: "10px 0",
-            background: "#FFFFFF",
-            border: `1.5px dashed ${gold}`,
-            color: gold,
-            borderRadius: 4,
-            fontSize: 13,
-            fontWeight: 700,
-          }}
-        >
-          習得済み（2回正解）— スキップして次へ
-        </button>
-      )}
 
       <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
         {question.options.map((opt, i) => {
@@ -2538,11 +2509,11 @@ function ResultView({ chapter, sessionQuestions, answers, onRetry, onHome }) {
             <span
               style={{
                 fontWeight: 700,
-                color: answers[i]?.skipped ? "#8A8F98" : answers[i]?.correct ? gold : brick,
+                color: answers[i]?.correct ? gold : brick,
                 minWidth: 18,
               }}
             >
-              {answers[i]?.skipped ? "⏭" : answers[i]?.correct ? "○" : "×"}
+              {answers[i]?.correct ? "○" : "×"}
             </span>
             <span style={{ color: "#3A4256", lineHeight: 1.5 }}>{q.q}</span>
           </div>
