@@ -1923,6 +1923,24 @@ function weightedSampleIndices(weights, n) {
   return keyed.slice(0, n).map((k) => k.i);
 }
 
+// window.storage 内で指定プレフィックスを持つキーを一括取得し、
+// プレフィックスを除いたキー名 -> パース済み値 のマップにして返す
+async function loadStorageMap(prefix) {
+  const map = {};
+  try {
+    const result = await window.storage.list(prefix);
+    if (result && result.keys) {
+      for (const k of result.keys) {
+        try {
+          const r = await window.storage.get(k);
+          if (r && r.value) map[k.replace(prefix, "")] = JSON.parse(r.value);
+        } catch (e) {}
+      }
+    }
+  } catch (e) {}
+  return map;
+}
+
 function Ticket({ children, style }) {
   return (
     <div
@@ -1953,36 +1971,32 @@ export default function GKenteiQuiz() {
   const [loaded, setLoaded] = useState(false);
   const [qStats, setQStats] = useState({}); // 現在の章: 問題index -> {c: 正解回数, a: 挑戦回数}
   const [sessionIndices, setSessionIndices] = useState([]); // 今回出題する問題の元配列インデックス（ランダム10問）
+  const [savedSessions, setSavedSessions] = useState({}); // chapterId -> 途中保存されたクイズの状態
 
   const chapter = CHAPTERS[chapterIdx];
   const currentOriginalIdx = sessionIndices[qIdx];
   const question = chapter && currentOriginalIdx !== undefined ? chapter.questions[currentOriginalIdx] : null;
 
-  // load progress
+  // load progress ＆ 途中保存されたクイズの状態
   useEffect(() => {
     (async () => {
-      try {
-        const result = await window.storage.list("progress:");
-        const map = {};
-        if (result && result.keys) {
-          for (const k of result.keys) {
-            try {
-              const r = await window.storage.get(k);
-              if (r && r.value) {
-                const chId = k.replace("progress:", "");
-                map[chId] = JSON.parse(r.value);
-              }
-            } catch (e) {}
-          }
-        }
-        setProgress(map);
-      } catch (e) {
-        // no stored progress yet
-      } finally {
-        setLoaded(true);
-      }
+      const [progressMap, sessionMap] = await Promise.all([
+        loadStorageMap("progress:"),
+        loadStorageMap("session:"),
+      ]);
+      setProgress(progressMap);
+      setSavedSessions(sessionMap);
+      setLoaded(true);
     })();
   }, []);
+
+  // クイズ回答中の状態を都度保存し、途中で離脱しても再開できるようにする
+  useEffect(() => {
+    if (view !== "quiz" || !chapter || sessionIndices.length === 0) return;
+    const snapshot = { sessionIndices, qIdx, answers, selected, revealed };
+    window.storage.set(`session:${chapter.id}`, JSON.stringify(snapshot)).catch(() => {});
+    setSavedSessions((prev) => ({ ...prev, [chapter.id]: snapshot }));
+  }, [view, chapter, sessionIndices, qIdx, answers, selected, revealed]);
 
   const saveProgress = useCallback(async (chapterId, scoreVal, total) => {
     try {
@@ -2014,6 +2028,19 @@ export default function GKenteiQuiz() {
   async function startChapter(idx) {
     const ch = CHAPTERS[idx];
     const stats = await loadQStats(ch.id);
+    const saved = savedSessions[ch.id];
+    if (saved && saved.sessionIndices?.length) {
+      // 途中保存されたクイズがあれば、続きから再開する
+      setSessionIndices(saved.sessionIndices);
+      setChapterIdx(idx);
+      setQIdx(saved.qIdx);
+      setSelected(saved.selected ?? null);
+      setRevealed(!!saved.revealed);
+      setAnswers(saved.answers || []);
+      setQStats(stats);
+      setView("quiz");
+      return;
+    }
     // 正解回数が少ない問題ほど重みを大きくして、ランダムだが優先的に出題されるようにする
     const weights = ch.questions.map((_, i) => 1 / ((stats[i]?.c || 0) + 1));
     const picked = weightedSampleIndices(weights, Math.min(10, ch.questions.length));
@@ -2065,6 +2092,13 @@ export default function GKenteiQuiz() {
     } else {
       const finalScore = newAnswers.filter((a) => a.correct).length;
       saveProgress(chapter.id, finalScore, sessionIndices.length);
+      // 章を完走したので途中保存は不要になる
+      window.storage.delete(`session:${chapter.id}`).catch(() => {});
+      setSavedSessions((prev) => {
+        const next = { ...prev };
+        delete next[chapter.id];
+        return next;
+      });
       setView("result");
     }
   }
@@ -2120,6 +2154,7 @@ export default function GKenteiQuiz() {
           <ChapterList
             chapters={CHAPTERS}
             progress={progress}
+            savedSessions={savedSessions}
             loaded={loaded}
             onSelect={startChapter}
             onBrowse={browseChapter}
@@ -2162,7 +2197,7 @@ export default function GKenteiQuiz() {
 }
 
 /* ---------------- 章選択画面 ---------------- */
-function ChapterList({ chapters, progress, loaded, onSelect, onBrowse }) {
+function ChapterList({ chapters, progress, savedSessions, loaded, onSelect, onBrowse }) {
   const groups = [
     { name: "技術分野", items: chapters.filter((c) => c.group === "技術分野") },
     { name: "法律・倫理分野", items: chapters.filter((c) => c.group === "法律・倫理分野") },
@@ -2199,6 +2234,7 @@ function ChapterList({ chapters, progress, loaded, onSelect, onBrowse }) {
             {g.items.map((c) => {
               const p = progress[c.id];
               const done = !!p;
+              const saved = savedSessions[c.id];
               return (
                 <div
                   key={c.id}
@@ -2238,9 +2274,9 @@ function ChapterList({ chapters, progress, loaded, onSelect, onBrowse }) {
                       <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 2 }}>{c.title}</div>
                       <div style={{ fontSize: 12, color: "#6B7280" }}>
                         {loaded
-                          ? done
-                            ? `最高 ${p.best}/${p.total} 問正解（挑戦 ${p.attempts} 回）`
-                            : `問題プール${c.questions.length}問からランダムに10問・未挑戦`
+                          ? saved
+                            ? `前回の続きから再開できます（${saved.answers.length}/${saved.sessionIndices.length}問まで回答済み）`
+                            : `問題プール${c.questions.length}問からランダムに10問`
                           : "読み込み中…"}
                       </div>
                     </div>
@@ -2260,7 +2296,7 @@ function ChapterList({ chapters, progress, loaded, onSelect, onBrowse }) {
                       fontWeight: 600,
                     }}
                   >
-                    問題一覧を見る（全{c.questions.length}問・正解回数で分類）
+                    問題一覧（全{c.questions.length}問）
                   </button>
                 </div>
               );
