@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useMemo } from "react";
 
 /* ============================================================
    localStorage ベースの簡易ストレージ層
@@ -2364,6 +2364,17 @@ function QuizView({ chapter, qIdx, total, question, selected, revealed, onPick, 
   const pct = ((qIdx + (revealed ? 1 : 0)) / total) * 100;
   const correctCount = qStat?.c || 0;
 
+  // 出題のたびに選択肢の並び順をシャッフルする（元の配列上のインデックスは保持し、
+  // 正誤判定や正解回数の記録には常に元のインデックスを使う）
+  const shuffledOptions = useMemo(() => {
+    const withIdx = question.options.map((text, origIdx) => ({ text, origIdx }));
+    for (let i = withIdx.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [withIdx[i], withIdx[j]] = [withIdx[j], withIdx[i]];
+    }
+    return withIdx;
+  }, [question]);
+
   return (
     <div>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
@@ -2418,7 +2429,7 @@ function QuizView({ chapter, qIdx, total, question, selected, revealed, onPick, 
       </Ticket>
 
       <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-        {question.options.map((opt, i) => {
+        {shuffledOptions.map(({ text: opt, origIdx: i }, displayIdx) => {
           const isCorrect = i === question.correct;
           const isChosen = i === selected;
           let bg = "#FFFFFF";
@@ -2469,7 +2480,7 @@ function QuizView({ chapter, qIdx, total, question, selected, revealed, onPick, 
                   color: revealed && isCorrect ? gold : revealed && isChosen ? brick : "#8A8F98",
                 }}
               >
-                {String.fromCharCode(65 + i)}
+                {String.fromCharCode(65 + displayIdx)}
               </span>
               <span style={{ flex: 1 }}>{opt}</span>
               {revealed && isCorrect && <span style={{ fontSize: 13, fontWeight: 700, color: gold }}>正解</span>}
