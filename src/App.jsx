@@ -2322,32 +2322,49 @@ export default function GKenteiQuiz() {
     }
   }, []);
 
-  async function startChapter(idx) {
+  async function resumeChapter(idx, saved) {
     const ch = CHAPTERS[idx];
     const stats = await loadQStats(ch.id);
+    setSessionIndices(saved.sessionIndices);
+    setChapterIdx(idx);
+    setQIdx(saved.qIdx);
+    setSelected(saved.selected ?? null);
+    setRevealed(!!saved.revealed);
+    setAnswers(saved.answers || []);
+    setQStats(stats);
+    setView("quiz");
+  }
+
+  // 章カードをタップしたとき：途中保存があればそのまま再開、なければ出題設定画面を開く
+  function openChapterSetup(idx) {
+    const ch = CHAPTERS[idx];
     const saved = savedSessions[ch.id];
     if (saved && saved.sessionIndices?.length) {
-      // 途中保存されたクイズがあれば、続きから再開する
-      setSessionIndices(saved.sessionIndices);
-      setChapterIdx(idx);
-      setQIdx(saved.qIdx);
-      setSelected(saved.selected ?? null);
-      setRevealed(!!saved.revealed);
-      setAnswers(saved.answers || []);
-      setQStats(stats);
-      setView("quiz");
+      resumeChapter(idx, saved);
       return;
     }
-    // 3回以上正解した問題（習得済み）は出題対象から除外し、
-    // 残った問題は正解回数が少ないほど重みを大きくして、ランダムだが優先的に出題されるようにする
-    const candidates = ch.questions
-      .map((_, i) => i)
-      .filter((i) => (stats[i]?.c || 0) < 3);
+    setChapterIdx(idx);
+    setView("setup");
+  }
+
+  // 出題設定画面で選んだ出題形式・設問数で、新しいクイズセッションを開始する
+  async function beginQuiz(mode, count) {
+    const ch = CHAPTERS[chapterIdx];
+    const stats = await loadQStats(ch.id);
+    const notMastered = ch.questions.map((_, i) => i).filter((i) => (stats[i]?.c || 0) < 3);
+    let candidates;
+    if (mode === "unanswered") {
+      // 「未正解」：まだ一度も正解したことがない問題のみを対象にする
+      const unanswered = ch.questions.map((_, i) => i).filter((i) => (stats[i]?.c || 0) === 0);
+      candidates = unanswered.length > 0 ? unanswered : notMastered;
+    } else {
+      // 「ランダム」：3回以上正解した習得済みの問題を除外し、正解回数が少ないほど優先的に出題する
+      candidates = notMastered;
+    }
     const pool = candidates.length > 0 ? candidates : ch.questions.map((_, i) => i);
     const weights = pool.map((i) => 1 / ((stats[i]?.c || 0) + 1));
-    const picked = weightedSampleIndices(weights, Math.min(10, pool.length)).map((wi) => pool[wi]);
+    const picked = weightedSampleIndices(weights, Math.min(count, pool.length)).map((wi) => pool[wi]);
     setSessionIndices(picked);
-    setChapterIdx(idx);
     setQIdx(0);
     setSelected(null);
     setRevealed(false);
@@ -2449,8 +2466,17 @@ export default function GKenteiQuiz() {
             savedSessions={savedSessions}
             allQStats={allQStats}
             loaded={loaded}
-            onSelect={startChapter}
+            onSelect={openChapterSetup}
             onBrowse={browseChapter}
+          />
+        )}
+
+        {view === "setup" && chapter && (
+          <ChapterSetupView
+            chapter={chapter}
+            allQStats={allQStats}
+            onStart={beginQuiz}
+            onExit={() => setView("chapters")}
           />
         )}
 
@@ -2479,11 +2505,122 @@ export default function GKenteiQuiz() {
             chapter={chapter}
             sessionQuestions={sessionIndices.map((i) => chapter.questions[i])}
             answers={answers}
-            onRetry={() => startChapter(chapterIdx)}
+            onRetry={() => setView("setup")}
             onHome={() => setView("chapters")}
           />
         )}
       </main>
+    </div>
+  );
+}
+
+/* ---------------- 出題設定画面 ---------------- */
+function ChapterSetupView({ chapter, allQStats, onStart, onExit }) {
+  const [mode, setMode] = useState("random");
+  const [count, setCount] = useState(10);
+
+  const stats = allQStats[chapter.id] || {};
+  const unansweredCount = chapter.questions.filter((_, i) => (stats[i]?.c || 0) === 0).length;
+  const notMasteredCount = chapter.questions.filter((_, i) => (stats[i]?.c || 0) < 3).length;
+
+  const modeOptions = [
+    { key: "random", label: "ランダム", desc: `未習得の問題（${notMasteredCount}問）から、正解回数が少ない問題ほど優先的に出題` },
+    { key: "unanswered", label: "未正解", desc: `まだ一度も正解していない問題（${unansweredCount}問）のみを対象に出題` },
+  ];
+  const countOptions = [5, 10, 20];
+
+  return (
+    <div>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
+        <button onClick={onExit} style={{ background: "none", border: "none", color: navy, fontSize: 13, padding: 0 }}>
+          ← 章選択に戻る
+        </button>
+        <div style={{ fontSize: 13, color: "#6B7280" }}>第{chapter.no}章</div>
+      </div>
+
+      <div style={{ fontFamily: serif, fontSize: 20, fontWeight: 700, color: navyDeep, marginBottom: 20 }}>
+        {chapter.title}
+      </div>
+
+      <div style={{ marginBottom: 24 }}>
+        <div style={{ fontSize: 12, fontWeight: 700, color: navy, letterSpacing: 1, marginBottom: 10 }}>
+          出題形式
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {modeOptions.map((m) => {
+            const isActive = mode === m.key;
+            return (
+              <button
+                key={m.key}
+                onClick={() => setMode(m.key)}
+                style={{
+                  textAlign: "left",
+                  padding: "12px 14px",
+                  background: isActive ? "#F5EFDE" : "#FFFFFF",
+                  border: `1.5px solid ${isActive ? gold : line}`,
+                  borderRadius: 4,
+                }}
+              >
+                <div style={{ fontSize: 14, fontWeight: 700, color: isActive ? navyDeep : ink, marginBottom: 2 }}>
+                  {isActive ? "● " : "○ "}
+                  {m.label}
+                </div>
+                <div style={{ fontSize: 12, color: "#6B7280" }}>{m.desc}</div>
+              </button>
+            );
+          })}
+        </div>
+        <p style={{ fontSize: 11, color: "#8A8F98", marginTop: 8 }}>
+          「未正解」の対象問題がない場合は、未習得の問題から出題します。
+        </p>
+      </div>
+
+      <div style={{ marginBottom: 28 }}>
+        <div style={{ fontSize: 12, fontWeight: 700, color: navy, letterSpacing: 1, marginBottom: 10 }}>
+          設問数
+        </div>
+        <div style={{ display: "flex", gap: 8 }}>
+          {countOptions.map((n) => {
+            const isActive = count === n;
+            return (
+              <button
+                key={n}
+                onClick={() => setCount(n)}
+                style={{
+                  flex: 1,
+                  padding: "12px 0",
+                  textAlign: "center",
+                  background: isActive ? navyDeep : "#FFFFFF",
+                  color: isActive ? "#F5F4EF" : ink,
+                  border: `1.5px solid ${isActive ? navyDeep : line}`,
+                  borderRadius: 4,
+                  fontWeight: 700,
+                  fontSize: 14,
+                }}
+              >
+                {n}問
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      <button
+        onClick={() => onStart(mode, count)}
+        style={{
+          width: "100%",
+          padding: "14px 0",
+          background: navyDeep,
+          color: "#F5F4EF",
+          border: "none",
+          borderRadius: 4,
+          fontSize: 15,
+          fontWeight: 700,
+          letterSpacing: 1,
+        }}
+      >
+        この設定で始める
+      </button>
     </div>
   );
 }
