@@ -2381,11 +2381,12 @@ export default function GKenteiQuiz() {
     setView("browse");
   }
 
-  // 正解履歴（章内の問題インデックス -> {c: 正解回数, a: 挑戦回数}）を1キーにまとめて保存
+  // 正解履歴（章内の問題インデックス -> {c: 正解回数, a: 挑戦回数, streak: 連続正解数}）を1キーにまとめて保存
   function recordAnswer(idx, isCorrect) {
     setQStats((prev) => {
-      const cur = prev[idx] || { c: 0, a: 0 };
-      const next = { ...prev, [idx]: { c: cur.c + (isCorrect ? 1 : 0), a: cur.a + 1 } };
+      const cur = prev[idx] || { c: 0, a: 0, streak: 0 };
+      const streak = isCorrect ? (cur.streak || 0) + 1 : 0;
+      const next = { ...prev, [idx]: { c: cur.c + (isCorrect ? 1 : 0), a: cur.a + 1, streak } };
       window.storage.set(`qstats:${chapter.id}`, JSON.stringify(next)).catch(() => {});
       setAllQStats((allPrev) => ({ ...allPrev, [chapter.id]: next }));
       return next;
@@ -3022,7 +3023,23 @@ function ResultView({ chapter, sessionQuestions, answers, onRetry, onHome }) {
   );
 }
 
-/* ---------------- 問題一覧（正解回数で分類）画面 ---------------- */
+/* ---------------- 問題一覧（直近の正解状況で分類）画面 ---------------- */
+// 未回答: 一度も解答していない
+// 苦手: 前回の解答が不正解だった
+// ほぼ覚えた: 前回の解答は正解だが、連続正解は1回のみ
+// 覚えた: 2回以上連続で正解している
+function classifyStat(stat) {
+  const a = stat?.a || 0;
+  if (a === 0) return "unanswered";
+  const streak = stat.streak !== undefined ? stat.streak : stat.c > 0 ? 1 : 0;
+  if (streak >= 2) return "memorized";
+  if (streak === 1) return "almost";
+  return "weak";
+}
+
+const STATUS_LABEL = { unanswered: "未回答", weak: "苦手", almost: "ほぼ覚えた", memorized: "覚えた" };
+const STATUS_COLOR = { unanswered: "#8A8F98", weak: brick, almost: gold, memorized: navy };
+
 function QuestionBrowseView({ chapter, qStats, onExit }) {
   const [openSet, setOpenSet] = useState(() => new Set());
   const [activeTab, setActiveTab] = useState(0);
@@ -3037,17 +3054,17 @@ function QuestionBrowseView({ chapter, qStats, onExit }) {
   }
 
   const buckets = [
-    { key: 0, label: "未正解" },
-    { key: 1, label: "1回正解" },
-    { key: 2, label: "2回正解" },
-    { key: "3+", label: "3回以上正解" },
+    { key: "unanswered", label: STATUS_LABEL.unanswered },
+    { key: "weak", label: STATUS_LABEL.weak },
+    { key: "almost", label: STATUS_LABEL.almost },
+    { key: "memorized", label: STATUS_LABEL.memorized },
   ];
 
   const grouped = buckets.map((b) => ({
     ...b,
     items: chapter.questions
-      .map((q, i) => ({ q, i, c: qStats[i]?.c || 0 }))
-      .filter(({ c }) => (b.key === "3+" ? c >= 3 : c === b.key)),
+      .map((q, i) => ({ q, i, status: classifyStat(qStats[i]) }))
+      .filter(({ status }) => status === b.key),
   }));
 
   const active = grouped[activeTab];
@@ -3067,7 +3084,7 @@ function QuestionBrowseView({ chapter, qStats, onExit }) {
         {chapter.title}
       </div>
       <p style={{ fontSize: 12, color: "#8A8F98", marginBottom: 16 }}>
-        タブで正解回数ごとに切り替えて確認できます。タップすると選択肢と解説を確認できます。
+        タブで直近の正解状況ごとに切り替えて確認できます。タップすると選択肢と解説を確認できます。
       </p>
 
       <div style={{ display: "flex", marginBottom: 18, borderBottom: `1px solid ${line}` }}>
@@ -3103,7 +3120,7 @@ function QuestionBrowseView({ chapter, qStats, onExit }) {
         </p>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          {active.items.map(({ q, i, c }) => {
+          {active.items.map(({ q, i, status }) => {
             const isOpen = openSet.has(i);
             return (
               <div
@@ -3127,13 +3144,13 @@ function QuestionBrowseView({ chapter, qStats, onExit }) {
                     style={{
                       fontSize: 11,
                       fontWeight: 700,
-                      color: c === 0 ? brick : gold,
-                      minWidth: 44,
+                      color: STATUS_COLOR[status],
+                      minWidth: 56,
                       marginTop: 2,
                       whiteSpace: "nowrap",
                     }}
                   >
-                    {c === 0 ? "未正解" : `${c}回`}
+                    {STATUS_LABEL[status]}
                   </span>
                   <span style={{ flex: 1, fontSize: 14, lineHeight: 1.6, color: ink }}>{q.q}</span>
                   <span style={{ fontSize: 16, color: "#B9B4A5", marginLeft: 6 }}>{isOpen ? "︿" : "﹀"}</span>
