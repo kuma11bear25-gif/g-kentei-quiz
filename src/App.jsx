@@ -2571,14 +2571,14 @@ export default function GKenteiQuiz() {
   async function beginQuiz(mode, count) {
     const ch = CHAPTERS[chapterIdx];
     const stats = await loadQStats(ch.id);
-    const notMastered = ch.questions.map((_, i) => i).filter((i) => (stats[i]?.c || 0) < 3);
+    const notMastered = ch.questions.map((_, i) => i).filter((i) => classifyStat(stats[i]) !== "memorized");
     let candidates;
     if (mode === "unanswered") {
       // 「未正解」：まだ一度も正解したことがない問題のみを対象にする
       const unanswered = ch.questions.map((_, i) => i).filter((i) => (stats[i]?.c || 0) === 0);
       candidates = unanswered.length > 0 ? unanswered : notMastered;
     } else {
-      // 「ランダム」：3回以上正解した習得済みの問題を除外し、正解回数が少ないほど優先的に出題する
+      // 「ランダム」：2回以上連続正解した「覚えた」問題を除外し、正解回数が少ないほど優先的に出題する
       candidates = notMastered;
     }
     const pool = candidates.length > 0 ? candidates : ch.questions.map((_, i) => i);
@@ -2742,7 +2742,7 @@ function ChapterSetupView({ chapter, allQStats, onStart, onExit }) {
 
   const stats = allQStats[chapter.id] || {};
   const unansweredCount = chapter.questions.filter((_, i) => (stats[i]?.c || 0) === 0).length;
-  const notMasteredCount = chapter.questions.filter((_, i) => (stats[i]?.c || 0) < 3).length;
+  const notMasteredCount = chapter.questions.filter((_, i) => classifyStat(stats[i]) !== "memorized").length;
 
   const modeOptions = [
     { key: "random", label: "ランダム", desc: `未習得の問題（${notMasteredCount}問）から、正解回数が少ない問題ほど優先的に出題` },
@@ -2886,7 +2886,7 @@ function ChapterList({ chapters, progress, savedSessions, allQStats, loaded, onS
               const done = !!p;
               const saved = savedSessions[c.id];
               const stats = allQStats[c.id] || {};
-              const masteredCount = Object.values(stats).filter((s) => (s?.c || 0) >= 3).length;
+              const masteredCount = Object.values(stats).filter((s) => classifyStat(s) === "memorized").length;
               const masteryPct = c.questions.length > 0 ? Math.round((masteredCount / c.questions.length) * 100) : 0;
               return (
                 <div
@@ -2941,10 +2941,10 @@ function ChapterList({ chapters, progress, savedSessions, allQStats, loaded, onS
                               overflow: "hidden",
                             }}
                           >
-                            <div style={{ width: `${masteryPct}%`, height: "100%", background: gold }} />
+                            <div style={{ width: `${masteryPct}%`, height: "100%", background: navy }} />
                           </div>
                           <div style={{ fontSize: 11, color: "#8A8F98", whiteSpace: "nowrap" }}>
-                            習得 {masteredCount}/{c.questions.length}（{masteryPct}%）
+                            覚えた {masteredCount}/{c.questions.length}（{masteryPct}%）
                           </div>
                         </div>
                       )}
