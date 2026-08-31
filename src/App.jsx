@@ -2984,7 +2984,7 @@ function ChapterList({ chapters, progress, savedSessions, allQStats, loaded, onS
 /* ---------------- クイズ画面 ---------------- */
 function QuizView({ chapter, qIdx, total, question, selected, revealed, onPick, onNext, onExit, currentScore, qStat }) {
   const pct = ((qIdx + (revealed ? 1 : 0)) / total) * 100;
-  const correctCount = qStat?.c || 0;
+  const status = classifyStat(qStat);
 
   // 出題のたびに選択肢の並び順をシャッフルする（元の配列上のインデックスは保持し、
   // 正誤判定や正解回数の記録には常に元のインデックスを使う）
@@ -3036,15 +3036,15 @@ function QuizView({ chapter, qIdx, total, question, selected, revealed, onPick, 
             style={{
               fontSize: 11,
               fontWeight: 700,
-              color: correctCount > 0 ? gold : "#8A8F98",
-              background: correctCount > 0 ? "#F5EFDE" : "#EFEEE8",
-              border: `1px solid ${correctCount > 0 ? gold : line}`,
+              color: STATUS_COLOR[status],
+              background: STATUS_BG[status],
+              border: `1px solid ${STATUS_COLOR[status]}`,
               borderRadius: 20,
               padding: "2px 9px",
               whiteSpace: "nowrap",
             }}
           >
-            {correctCount > 0 ? `✓ 過去に正解 ${correctCount}回` : "未正解"}
+            {STATUS_LABEL[status]}
           </div>
         </div>
         <p style={{ fontSize: 17, lineHeight: 1.7, margin: 0, fontWeight: 600 }}>{question.q}</p>
@@ -3259,6 +3259,7 @@ function classifyStat(stat) {
 
 const STATUS_LABEL = { unanswered: "未回答", weak: "苦手", almost: "ほぼ覚えた", memorized: "覚えた" };
 const STATUS_COLOR = { unanswered: "#8A8F98", weak: brick, almost: gold, memorized: navy };
+const STATUS_BG = { unanswered: "#EFEEE8", weak: "#F6E9E9", almost: "#F5EFDE", memorized: "#E7EBF2" };
 
 function QuestionBrowseView({ chapter, qStats, onExit }) {
   const [openSet, setOpenSet] = useState(() => new Set());
