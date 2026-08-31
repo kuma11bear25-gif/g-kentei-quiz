@@ -2605,7 +2605,11 @@ export default function GKenteiQuiz() {
   function recordAnswer(idx, isCorrect) {
     setQStats((prev) => {
       const cur = prev[idx] || { c: 0, a: 0, streak: 0 };
-      const streak = isCorrect ? (cur.streak || 0) + 1 : 0;
+      // streakが未保存の古い記録（streak導入前のデータ）は、表示側のclassifyStatと同じ基準で
+      // 直前の連続正解数を推定してから加算する（そうしないと表示は「ほぼ覚えた」なのに
+      // 実際のカウントは0からやり直しになり、正解しても「覚えた」にならないズレが生じる）
+      const priorStreak = cur.streak !== undefined ? cur.streak : cur.c > 0 ? 1 : 0;
+      const streak = isCorrect ? priorStreak + 1 : 0;
       const next = { ...prev, [idx]: { c: cur.c + (isCorrect ? 1 : 0), a: cur.a + 1, streak } };
       window.storage.set(`qstats:${chapter.id}`, JSON.stringify(next)).catch(() => {});
       setAllQStats((allPrev) => ({ ...allPrev, [chapter.id]: next }));
